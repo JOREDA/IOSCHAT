@@ -1,3 +1,4 @@
+// App.tsx
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
@@ -8,12 +9,12 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 
-const API_BASE_URL = 'http://192.168.0.105:5001'; // Replace with your backend URL
+const API_BASE_URL = 'http://192.168.0.105:5001';
 
 interface Chat {
   _id: string;
@@ -22,262 +23,227 @@ interface Chat {
 
 interface Message {
   _id: string;
-  sender: string; // In real usage, compare with current user ID
+  sender: string;
   text: string;
   image?: string;
   timestamp: string;
 }
 
-const App = () => {
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState<string>('');
+export default function App() {
+  // 1) Seed with dummy chats so UI shows immediately
+  const dummyChats: Chat[] = [
+    { _id: '1', name: 'Alice' },
+    { _id: '2', name: 'Bob' },
+    { _id: '3', name: 'Carol' },
+  ];
+  
+  const [chats, setChats] = useState<Chat[]>(dummyChats);
+  const [selectedChatId, setSelectedChatId] = useState<string>(dummyChats[0]._id);
+  const [messages, setMessages] = useState<Message[]>([
+    // seed dummy messages for the first chat
+    {
+      _id: 'm1',
+      sender: 'Alice',
+      text: 'Welcome to the dummy chat!',
+      timestamp: new Date().toISOString(),
+    },
+  ]);
+  const [newMessage, setNewMessage] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [loadingChats, setLoadingChats] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Load chat list
+  // 2) Optional: actually fetch real chats (will overwrite dummy if backend returns non‑empty)
   useEffect(() => {
-    const fetchChats = async () => {
+    (async () => {
+      setLoadingChats(true);
       try {
-        const token = await AsyncStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/chatlist`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        console.log('Fetched chats:', response.data); 
-        setChats(response.data);
-      } catch (error) {
-        console.error('Error fetching chats:', error);
+        const res = await axios.get<Chat[]>(`${API_BASE_URL}/chatlist`);
+        if (res.data.length) {
+          setChats(res.data);
+          setSelectedChatId(res.data[0]._id);
+        }
+      } catch (err) {
+        console.warn('Could not fetch chats, using dummy');
+      } finally {
+        setLoadingChats(false);
       }
-    };
-    fetchChats();
+    })();
   }, []);
 
-  useEffect(() => {
-    const requestPermissions = async () => {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        alert('Permission to access media library is required!');
-      }
-    };
-    requestPermissions();
-  }, []);  
-
-  // Load messages when a chat is selected
+  // 3) Load messages for whichever chat is selected
   const loadMessages = async (chatId: string) => {
+    setSelectedChatId(chatId);
+    setLoadingMessages(true);
     try {
-      setSelectedChatId(chatId);
-      const token = await AsyncStorage.getItem('token');
-      const response = await axios.get(`${API_BASE_URL}/messages/${chatId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setMessages(response.data);
-    } catch (error) {
-      console.error('Error loading messages:', error);
+      const res = await axios.get<Message[]>(`${API_BASE_URL}/messages/${chatId}`);
+      if (res.data.length) {
+        setMessages(res.data);
+      }
+    } catch {
+      console.warn('Could not fetch messages, keeping dummy');
+    } finally {
+      setLoadingMessages(false);
+      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 50);
     }
   };
 
-  // Handle sending messages
-  const handleSendMessage = async () => {
-    if (!newMessage.trim() && !imageUri) return;
-    if (!selectedChatId) return;
+  // 4) Send message stub (still dummy until backend is up)
+  const handleSend = async () => {
+    if (!newMessage.trim()) return;
+    const next: Message = {
+      _id: Date.now().toString(),
+      sender: 'me',
+      text: newMessage,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(m => [...m, next]);
+    setNewMessage('');
+    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 50);
 
-    const token = await AsyncStorage.getItem('token');
-    const formData = new FormData();
-    formData.append('text', newMessage);
-    formData.append('chatId', selectedChatId);
-
-    if (imageUri) {
-      const file = {
-        uri: imageUri,
-        type: 'image/jpeg',
-        name: 'message.jpg',
-      } as any;
-      formData.append('image', file);
-    }
-
-    try {
-      const response = await axios.post(`${API_BASE_URL}/messages/send`, formData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      setMessages((prev) => [...prev, response.data]);
-      setNewMessage('');
-      setImageUri(null);
-
-      // Auto-scroll to bottom
-      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
-    } catch (error) {
-      console.error('Message send error:', error);
-    }
+    // uncomment below to hit real endpoint once ready:
+    /*
+    const form = new FormData();
+    form.append('text', newMessage);
+    form.append('chatId', selectedChatId);
+    if (imageUri) form.append('image', { uri: imageUri, type: 'image/jpeg', name: 'photo.jpg' } as any);
+    await axios.post(`${API_BASE_URL}/messages/send`, form, { headers:{ 'Content-Type':'multipart/form-data'}})
+      .then(res=>setMessages(m=>[...m,res.data]))
+      .catch(console.error);
+    setImageUri(null);
+    */
   };
 
+  // 5) Pick image stub
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.5,
-    });
-
-    if (!result.canceled) {
-      setImageUri(result.assets[0].uri);
-    }
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return alert('grant permission');
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes:ImagePicker.MediaTypeOptions.Images, quality:0.5 });
+    if (!result.canceled) setImageUri(result.assets[0].uri);
   };
 
   return (
-
-    <View style={styles.container}>
-      {!selectedChatId ? (
-    <FlatList
-        data={chats}
-        keyExtractor={(item) => item._id}
-        renderItem={({ item }) => (
-          <TouchableOpacity onPress={() => loadMessages(item._id)} style={styles.chatItem}>
-            <Text style={styles.chatName}>{item.name}</Text>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.containername}>No chats available</Text>
-        }
-      />
-      ) : (
-
-        <>
-          <ScrollView
-            style={styles.messageArea}
-            ref={scrollViewRef}
-            onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
-          >
-            {messages.map((msg) => (
-              <View
-                key={msg._id}
+    <View style={styles.outer}>
+      {/* Chat List */}
+      <View style={styles.listPane}>
+        {loadingChats ? (
+          <ActivityIndicator />
+        ) : (
+          <FlatList
+            data={chats}
+            keyExtractor={c => c._id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
                 style={[
-                  styles.messageContainer,
-                  msg.sender === 'me' ? styles.senderMessage : styles.receiverMessage,
+                  styles.chatItem,
+                  item._id === selectedChatId && styles.chatItemActive,
                 ]}
+                onPress={() => loadMessages(item._id)}
               >
-                {msg.image && <Image source={{ uri: msg.image }} style={styles.image} />}
-                <Text style={styles.messageText}>{msg.text}</Text>
-                <Text style={styles.timestamp}>
-                  {new Date(msg.timestamp).toLocaleTimeString()}
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
+                <Text style={styles.chatName}>{item.name}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        )}
+      </View>
 
-          {imageUri && (
-            <Image source={{ uri: imageUri }} style={styles.previewImage} />
-          )}
+      {/* Chat View */}
+      <View style={styles.chatPane}>
+        {loadingMessages ? (
+          <ActivityIndicator />
+        ) : (
+          <>
+            <ScrollView
+              ref={scrollViewRef}
+              onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+              style={styles.messageArea}
+            >
+              {messages.map(m => (
+                <View
+                  key={m._id}
+                  style={[
+                    styles.bubble,
+                    m.sender === 'me' ? styles.bubbleRight : styles.bubbleLeft,
+                  ]}
+                >
+                  {m.image && <Image source={{ uri: m.image }} style={styles.msgImage} />}
+                  <Text>{m.text}</Text>
+                  <Text style={styles.ts}>
+                    {new Date(m.timestamp).toLocaleTimeString()}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
 
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.input}
-              value={newMessage}
-              onChangeText={setNewMessage}
-              placeholder="Type a message"
-            />
-            <TouchableOpacity onPress={pickImage} style={styles.iconButton}>
-              <Text style={styles.iconText}>📷</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleSendMessage} style={styles.sendButton}>
-              <Text style={styles.iconText}>➡️</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.input}
+                placeholder="Type a message…"
+                value={newMessage}
+                onChangeText={setNewMessage}
+              />
+              <TouchableOpacity onPress={pickImage} style={styles.iconBtn}>
+                <Text>📷</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleSend} style={styles.iconBtn}>
+                <Text>➡️</Text>
+              </TouchableOpacity>
+            </View>
+            {imageUri && <Image source={{ uri: imageUri }} style={styles.preview} />}
+          </>
+        )}
+      </View>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 10,
-    backgroundColor: '#dbe6e9',
-  },
-  containername: {
-    flex: 1,
-    padding: 10,
-    backgroundColor: '#dbe6e9',
-    fontSize: 40,
-    fontWeight: 'bold',
-    justifyContent: 'center', 
-    alignItems: 'center',
-    textAlign: 'center', 
+  outer: { flex: 1, flexDirection: 'row' },
+  listPane: {
+    width: '30%',
+    backgroundColor: '#f4f4f4',
+    padding: 8,
+    borderRightWidth: 1,
+    borderRightColor: '#ccc',
   },
   chatItem: {
-    padding: 15,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 10,
-    marginBottom: 10,
+    padding: 12,
+    marginVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#ddd',
   },
-  chatName: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  chatItemActive: { backgroundColor: '#bbb' },
+  chatName: { fontSize: 16 },
+
+  chatPane: { flex: 1, backgroundColor: '#fff', padding: 8 },
+  messageArea: { flex: 1 },
+
+  bubble: {
+    maxWidth: '75%',
+    marginVertical: 4,
+    padding: 8,
+    borderRadius: 8,
   },
-  messageArea: {
-    flex: 1,
-    marginBottom: 10,
-  },
-  messageContainer: {
-    marginVertical: 5,
-    padding: 10,
-    borderRadius: 10,
-    maxWidth: '80%',
-  },
-  senderMessage: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#cdeffd',
-  },
-  receiverMessage: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#f0f0f0',
-  },
-  messageText: {
-    fontSize: 16,
-  },
-  timestamp: {
-    fontSize: 10,
-    color: '#777',
-    marginTop: 4,
-  },
-  image: {
-    width: 150,
-    height: 150,
-    borderRadius: 10,
-    marginTop: 5,
-  },
-  previewImage: {
-    width: 100,
-    height: 100,
-    alignSelf: 'center',
-    marginBottom: 10,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  bubbleLeft: { alignSelf: 'flex-start', backgroundColor: '#eee' },
+  bubbleRight: { alignSelf: 'flex-end', backgroundColor: '#cdeffd' },
+  ts: { fontSize: 10, color: '#666', marginTop: 4 },
+
+  inputRow: { flexDirection: 'row', alignItems: 'center' },
   input: {
     flex: 1,
     borderColor: '#ccc',
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginRight: 5,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
-  iconButton: {
-    padding: 8,
+  iconBtn: { marginLeft: 8, padding: 6 },
+  preview: {
+    width: 80,
+    height: 80,
+    alignSelf: 'center',
+    marginVertical: 4,
   },
-  sendButton: {
-    padding: 8,
-  },
-  iconText: {
-    fontSize: 18,
-  },
+  msgImage: { width: 120, height: 120, borderRadius: 8, marginBottom: 4 },
 });
-
-export default App;
