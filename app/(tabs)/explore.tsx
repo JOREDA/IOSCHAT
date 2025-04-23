@@ -1,4 +1,3 @@
-// App.tsx
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
@@ -30,31 +29,32 @@ interface Message {
 }
 
 export default function App() {
-  // 1) Seed with dummy chats so UI shows immediately
   const dummyChats: Chat[] = [
     { _id: '1', name: 'Alice' },
     { _id: '2', name: 'Bob' },
     { _id: '3', name: 'Carol' },
   ];
-  
+
   const [chats, setChats] = useState<Chat[]>(dummyChats);
   const [selectedChatId, setSelectedChatId] = useState<string>(dummyChats[0]._id);
-  const [messages, setMessages] = useState<Message[]>([
-    // seed dummy messages for the first chat
-    {
-      _id: 'm1',
-      sender: 'Alice',
-      text: 'Welcome to the dummy chat!',
-      timestamp: new Date().toISOString(),
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<Record<string, Message[]>>({
+    '1': [
+      {
+        _id: 'm1',
+        sender: 'Alice',
+        text: 'Welcome to the dummy chat!',
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  });
   const [newMessage, setNewMessage] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [loadingChats, setLoadingChats] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // 2) Optional: actually fetch real chats (will overwrite dummy if backend returns non‑empty)
+  const messages = chatMessages[selectedChatId] || [];
+
   useEffect(() => {
     (async () => {
       setLoadingChats(true);
@@ -72,24 +72,20 @@ export default function App() {
     })();
   }, []);
 
-  // 3) Load messages for whichever chat is selected
   const loadMessages = async (chatId: string) => {
     setSelectedChatId(chatId);
     setLoadingMessages(true);
     try {
       const res = await axios.get<Message[]>(`${API_BASE_URL}/messages/${chatId}`);
-      if (res.data.length) {
-        setMessages(res.data);
-      }
+      setChatMessages(prev => ({ ...prev, [chatId]: res.data }));
     } catch {
-      console.warn('Could not fetch messages, keeping dummy');
+      console.warn('Could not fetch messages, keeping existing or dummy');
     } finally {
       setLoadingMessages(false);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 50);
     }
   };
 
-  // 4) Send message stub (still dummy until backend is up)
   const handleSend = async () => {
     if (!newMessage.trim()) return;
     const next: Message = {
@@ -98,34 +94,40 @@ export default function App() {
       text: newMessage,
       timestamp: new Date().toISOString(),
     };
-    setMessages(m => [...m, next]);
+
+    setChatMessages(prev => ({
+      ...prev,
+      [selectedChatId]: [...(prev[selectedChatId] || []), next],
+    }));
+
     setNewMessage('');
     setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 50);
 
-    // uncomment below to hit real endpoint once ready:
-    /*
     const form = new FormData();
     form.append('text', newMessage);
     form.append('chatId', selectedChatId);
     if (imageUri) form.append('image', { uri: imageUri, type: 'image/jpeg', name: 'photo.jpg' } as any);
     await axios.post(`${API_BASE_URL}/messages/send`, form, { headers:{ 'Content-Type':'multipart/form-data'}})
-      .then(res=>setMessages(m=>[...m,res.data]))
+      .then(res => setChatMessages(prev => ({
+        ...prev,
+        [selectedChatId]: [...(prev[selectedChatId] || []), res.data],
+      })))
       .catch(console.error);
     setImageUri(null);
-    */
   };
 
-  // 5) Pick image stub
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') return alert('grant permission');
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes:ImagePicker.MediaTypeOptions.Images, quality:0.5 });
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.5,
+    });
     if (!result.canceled) setImageUri(result.assets[0].uri);
   };
 
   return (
     <View style={styles.outer}>
-      {/* Chat List */}
       <View style={styles.listPane}>
         {loadingChats ? (
           <ActivityIndicator />
@@ -148,7 +150,6 @@ export default function App() {
         )}
       </View>
 
-      {/* Chat View */}
       <View style={styles.chatPane}>
         {loadingMessages ? (
           <ActivityIndicator />

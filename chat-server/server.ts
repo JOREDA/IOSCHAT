@@ -142,6 +142,7 @@ app.get('/chatlist', verifyToken, async (req: CustomRequest, res: Response): Pro
 });
 
 // --- Real-time Chat ---
+// --- Real-time Chat ---
 io.on('connection', socket => {
   console.log('User connected');
 
